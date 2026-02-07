@@ -30,6 +30,7 @@ with st.sidebar:
     st.divider()
     selected_tool = st.radio("Select Tool:", [
         "🏠 Dashboard",
+        "📂 Universal Reader",
         "📄 PDF Toolkit",
         "🎥 Video Merger",
         "✂️ Video Trimmer",
@@ -278,3 +279,4 @@ elif selected_tool == "📇 CSV to VCF":
 # =============================================================================
 elif selected_tool == "📂 Universal Reader":
     AllFormatReaderWeb.run()            
+
