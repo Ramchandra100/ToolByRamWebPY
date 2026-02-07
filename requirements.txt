@@ -3,3 +3,6 @@ pandas
 pypdf
 Pillow
 imageio-ffmpeg
+python-docx
+openpyxl
+python-pptx
