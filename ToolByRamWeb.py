@@ -7,6 +7,7 @@ import subprocess
 import os
 import io
 import shutil
+import AllFormatReaderWeb
 
 # =============================================================================
 # 1. PAGE CONFIGURATION
@@ -271,3 +272,9 @@ elif selected_tool == "📇 CSV to VCF":
                 st.download_button("Download VCF", vcard_data, "contacts.vcf", "text/vcard")
         except Exception as e:
             st.error(f"Error: {e}")
+
+# =============================================================================
+# TOOL: UNIVERSAL READER
+# =============================================================================
+elif selected_tool == "📂 Universal Reader":
+    AllFormatReaderWeb.run()            
