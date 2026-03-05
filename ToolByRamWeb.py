@@ -23,6 +23,13 @@ st.set_page_config(
 )
 
 # =============================================================================
+# IMPORT MODULES
+# =============================================================================
+# Import the modules after page config
+import AllFormatReaderWeb
+import ExcelVaultWeb
+
+# =============================================================================
 # CUSTOM CSS FOR MODERN UI
 # =============================================================================
 st.markdown("""
@@ -124,6 +131,8 @@ if 'temp_dir' not in st.session_state:
     st.session_state.temp_dir = tempfile.mkdtemp()
 if 'dark_mode' not in st.session_state:
     st.session_state.dark_mode = False
+if 'current_page' not in st.session_state:
+    st.session_state.current_page = "Dashboard"
 
 # =============================================================================
 # SIDEBAR NAVIGATION
@@ -139,32 +148,45 @@ with st.sidebar:
     
     st.divider()
     
-    # Tool categories with icons
-    categories = {
-        "📊 Dashboard": "🏠 Dashboard",
-        "📂 Universal Reader": "📂 Universal Reader",
-        "📄 PDF Tools": "📄 PDF Toolkit",
-        "🎥 Video Tools": {
-            "🎬 Video Merger": "🎥 Video Merger",
-            "✂️ Video Trimmer": "✂️ Video Trimmer",
-            "📉 Video Compressor": "📉 Video Compressor",
-            "🔊 Audio Handler": "🔊 Audio Handler"
-        },
-        "📇 Data Tools": "📇 CSV to VCF",
-        "⚙️ Settings": "⚙️ Settings"
-    }
+    # Dashboard
+    if st.button("🏠 Dashboard", use_container_width=True):
+        st.session_state.current_page = "Dashboard"
     
-    # Create nested navigation
-    selected_tool = None
-    for key, value in categories.items():
-        if isinstance(value, dict):
-            st.markdown(f"**{key}**")
-            for sub_key, sub_value in value.items():
-                if st.button(sub_key, key=sub_key, use_container_width=True):
-                    selected_tool = sub_value
-        else:
-            if st.button(key, key=key, use_container_width=True):
-                selected_tool = value
+    # File Tools Section
+    st.markdown("**📁 File Tools**")
+    if st.button("📂 Universal Reader", use_container_width=True):
+        st.session_state.current_page = "Universal Reader"
+    if st.button("🔐 Excel Vault", use_container_width=True):
+        st.session_state.current_page = "Excel Vault"
+    
+    # PDF Tools Section
+    st.markdown("**📄 PDF Tools**")
+    if st.button("📄 PDF Toolkit", use_container_width=True):
+        st.session_state.current_page = "PDF Toolkit"
+    
+    # Video Tools Section
+    st.markdown("**🎥 Video Tools**")
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("🎬 Merger", use_container_width=True):
+            st.session_state.current_page = "Video Merger"
+        if st.button("✂️ Trimmer", use_container_width=True):
+            st.session_state.current_page = "Video Trimmer"
+    with col2:
+        if st.button("📉 Compressor", use_container_width=True):
+            st.session_state.current_page = "Video Compressor"
+        if st.button("🔊 Audio", use_container_width=True):
+            st.session_state.current_page = "Audio Handler"
+    
+    # Data Tools Section
+    st.markdown("**📇 Data Tools**")
+    if st.button("📇 CSV to VCF", use_container_width=True):
+        st.session_state.current_page = "CSV to VCF"
+    
+    # Settings
+    st.markdown("**⚙️ System**")
+    if st.button("⚙️ Settings", use_container_width=True):
+        st.session_state.current_page = "Settings"
     
     st.divider()
     
@@ -209,9 +231,11 @@ def create_metric_card(title, value, delta=None):
         st.metric(title, value, delta)
 
 # =============================================================================
-# DASHBOARD
+# PAGE ROUTING
 # =============================================================================
-if selected_tool == "🏠 Dashboard" or selected_tool is None:
+
+# DASHBOARD
+if st.session_state.current_page == "Dashboard":
     st.markdown('<p class="main-header">Welcome Back, Engineer! 👋</p>', unsafe_allow_html=True)
     
     # Quick stats
@@ -219,7 +243,7 @@ if selected_tool == "🏠 Dashboard" or selected_tool is None:
     with col1:
         st.metric("Files Processed", len(st.session_state.processed_files), "Today")
     with col2:
-        st.metric("Available Tools", "8", "+2 this week")
+        st.metric("Available Tools", "9", "+3 this week")
     with col3:
         st.metric("Storage Used", "0 MB", "of 1 GB")
     with col4:
@@ -233,43 +257,76 @@ if selected_tool == "🏠 Dashboard" or selected_tool is None:
     
     with col1:
         if st.button("📄 Merge PDFs", use_container_width=True):
-            selected_tool = "📄 PDF Toolkit"
+            st.session_state.current_page = "PDF Toolkit"
+            st.rerun()
     
     with col2:
         if st.button("🎬 Merge Videos", use_container_width=True):
-            selected_tool = "🎥 Video Merger"
+            st.session_state.current_page = "Video Merger"
+            st.rerun()
     
     with col3:
         if st.button("📇 Convert CSV", use_container_width=True):
-            selected_tool = "📇 CSV to VCF"
+            st.session_state.current_page = "CSV to VCF"
+            st.rerun()
     
     with col4:
         if st.button("📂 Read File", use_container_width=True):
-            selected_tool = "📂 Universal Reader"
+            st.session_state.current_page = "Universal Reader"
+            st.rerun()
+    
+    # Featured tools
+    st.markdown('<p class="sub-header">🌟 Featured Tools</p>', unsafe_allow_html=True)
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        with st.container():
+            st.markdown("""
+            <div style="padding: 20px; border-radius: 10px; background: linear-gradient(135deg, #667eea20 0%, #764ba220 100%);">
+                <h3>🔐 Excel Vault Pro</h3>
+                <p>Secure your sensitive Excel data with military-grade AES-256 encryption. Encrypt specific columns, batch process files, and more.</p>
+            </div>
+            """, unsafe_allow_html=True)
+            if st.button("Try Excel Vault →", key="feature_excel"):
+                st.session_state.current_page = "Excel Vault"
+                st.rerun()
+    
+    with col2:
+        with st.container():
+            st.markdown("""
+            <div style="padding: 20px; border-radius: 10px; background: linear-gradient(135deg, #667eea20 0%, #764ba220 100%);">
+                <h3>📂 Universal Reader</h3>
+                <p>View any document format in your browser - PDF, Word, Excel, PowerPoint, images, and more. No download required.</p>
+            </div>
+            """, unsafe_allow_html=True)
+            if st.button("Try Universal Reader →", key="feature_reader"):
+                st.session_state.current_page = "Universal Reader"
+                st.rerun()
     
     st.divider()
     
     # Usage tips
     with st.expander("💡 Pro Tips", expanded=False):
         st.info("""
-        - Use Universal Reader to preview any document before processing
+        - **Excel Vault**: Encrypt sensitive columns in Excel files with password protection
+        - **Universal Reader**: Preview any document before processing
         - Video tools work best with files under 200MB
         - Recent files are tracked in the sidebar for quick access
         - Dark mode available in settings
         """)
 
-# =============================================================================
-# UNIVERSAL READER (Imported functionality)
-# =============================================================================
-elif selected_tool == "📂 Universal Reader":
-    # Import and run the Universal Reader module
-    import AllFormatReaderWeb
+# UNIVERSAL READER
+elif st.session_state.current_page == "Universal Reader":
     AllFormatReaderWeb.run()
+
+# EXCEL VAULT
+elif st.session_state.current_page == "Excel Vault":
+    ExcelVaultWeb.run()
 
 # =============================================================================
 # PDF TOOLKIT
 # =============================================================================
-elif selected_tool == "📄 PDF Toolkit":
+elif st.session_state.current_page == "PDF Toolkit":
     st.markdown('<p class="sub-header">📄 PDF Toolkit Pro</p>', unsafe_allow_html=True)
     
     tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
@@ -634,7 +691,7 @@ elif selected_tool == "📄 PDF Toolkit":
 # =============================================================================
 # VIDEO MERGER
 # =============================================================================
-elif selected_tool == "🎥 Video Merger":
+elif st.session_state.current_page == "Video Merger":
     st.markdown('<p class="sub-header">🎥 Ultra Video Merger</p>', unsafe_allow_html=True)
     
     st.warning("""
@@ -720,7 +777,7 @@ elif selected_tool == "🎥 Video Merger":
 # =============================================================================
 # VIDEO TRIMMER
 # =============================================================================
-elif selected_tool == "✂️ Video Trimmer":
+elif st.session_state.current_page == "Video Trimmer":
     st.markdown('<p class="sub-header">✂️ Video Trimmer</p>', unsafe_allow_html=True)
     
     vid = st.file_uploader("Upload Video", type="mp4", key="trim_v")
@@ -789,7 +846,7 @@ elif selected_tool == "✂️ Video Trimmer":
 # =============================================================================
 # VIDEO COMPRESSOR
 # =============================================================================
-elif selected_tool == "📉 Video Compressor":
+elif st.session_state.current_page == "Video Compressor":
     st.markdown('<p class="sub-header">📉 Video Compressor</p>', unsafe_allow_html=True)
     
     vid = st.file_uploader("Upload Video", type="mp4", key="comp_v")
@@ -881,7 +938,7 @@ elif selected_tool == "📉 Video Compressor":
 # =============================================================================
 # AUDIO HANDLER
 # =============================================================================
-elif selected_tool == "🔊 Audio Handler":
+elif st.session_state.current_page == "Audio Handler":
     st.markdown('<p class="sub-header">🔊 Audio Handler</p>', unsafe_allow_html=True)
     
     tab1, tab2 = st.tabs(["🔇 Mute Video", "🔄 Replace Audio"])
@@ -993,7 +1050,7 @@ elif selected_tool == "🔊 Audio Handler":
 # =============================================================================
 # CSV TO VCF CONVERTER
 # =============================================================================
-elif selected_tool == "📇 CSV to VCF":
+elif st.session_state.current_page == "CSV to VCF":
     st.markdown('<p class="sub-header">📇 CSV to VCF Contact Converter</p>', unsafe_allow_html=True)
     
     st.info("""
@@ -1120,7 +1177,7 @@ elif selected_tool == "📇 CSV to VCF":
 # =============================================================================
 # SETTINGS PAGE
 # =============================================================================
-elif selected_tool == "⚙️ Settings":
+elif st.session_state.current_page == "Settings":
     st.markdown('<p class="sub-header">⚙️ Settings</p>', unsafe_allow_html=True)
     
     tab1, tab2, tab3 = st.tabs(["General", "Storage", "About"])
@@ -1183,7 +1240,8 @@ elif selected_tool == "⚙️ Settings":
         **Description:** A comprehensive cloud-based toolkit for engineers
         
         **Features:**
-        - Universal File Reader (PDF, DOCX, PPTX, XLSX, CSV, TXT)
+        - Universal File Reader (PDF, DOCX, PPTX, XLSX, CSV, TXT, Images)
+        - Excel Vault (AES-256 encryption for Excel files)
         - PDF Toolkit (Merge, Split, Lock, Unlock, Convert)
         - Video Processing (Merge, Trim, Compress)
         - Audio Handler (Mute, Replace Audio)
@@ -1195,6 +1253,7 @@ elif selected_tool == "⚙️ Settings":
         - FFmpeg
         - PyPDF
         - Pandas
+        - Cryptography
         
         **Support:** For issues or feature requests, please contact the developer.
         """)
