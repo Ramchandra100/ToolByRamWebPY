@@ -259,7 +259,7 @@ def run():
                             # Read the file
                             df = pd.read_excel(uploaded_file)
                             
-                            # Generate a UNIQUE salt for this encryption (critical fix!)
+                            # Generate a UNIQUE salt for this encryption
                             salt = generate_salt()
                             
                             # Generate encryption key with the unique salt
@@ -304,15 +304,15 @@ def run():
                                     zip_file.writestr(f"metadata_{uploaded_file.name.replace('.xlsx', '.json')}", meta_buffer.getvalue())
                                 
                                 # Success message with important note
-                                st.markdown("""
+                                st.markdown(f"""
                                 <div class="success-box">
                                     <strong>✅ Encryption successful!</strong><br>
-                                    - Encrypted {} columns<br>
-                                    - {} rows processed<br>
-                                    - Using {:,} iterations<br><br>
+                                    - Encrypted {encrypted_count} columns<br>
+                                    - {len(df)} rows processed<br>
+                                    - Using {iterations:,} iterations<br><br>
                                     <strong>⚠️ IMPORTANT:</strong> Keep the metadata file safe! It contains the salt needed for decryption.
                                 </div>
-                                """.format(encrypted_count, len(df), iterations), unsafe_allow_html=True)
+                                """, unsafe_allow_html=True)
                                 
                                 # Download button
                                 st.download_button(
@@ -331,72 +331,40 @@ def run():
                         st.error(f"Encryption failed: {str(e)}")
     
     # =============================================================================
-    # TAB 2: DECRYPT FILE
+    # TAB 2: DECRYPT FILE (SIMPLIFIED)
     # =============================================================================
     with tab2:
-        st.markdown("### 📁 Upload Encrypted File")
+        st.markdown("### 🔓 Decrypt Your Excel File")
         
-        # Upload option
-        upload_option = st.radio(
-            "Select upload method",
-            ["Upload ZIP package", "Upload Excel + JSON separately"],
-            horizontal=True,
-            key="decrypt_option"
+        st.info("""
+        **How to decrypt:**
+        1. Upload the encrypted Excel file
+        2. Enter the password
+        3. Click Decrypt
+        
+        *The metadata file should be in the same folder with the same name (just with .json extension)*
+        """)
+        
+        # Simple file upload - just the Excel file
+        encrypted_file = st.file_uploader(
+            "Upload encrypted Excel file",
+            type=['xlsx'],
+            key="decrypt_file",
+            help="Select the encrypted Excel file (e.g., encrypted_data.xlsx)"
         )
         
-        encrypted_file = None
-        meta_file = None
-        metadata = None
-        
-        if upload_option == "Upload ZIP package":
-            zip_file = st.file_uploader(
-                "Upload encrypted ZIP package",
-                type=['zip'],
-                key="decrypt_zip",
-                help="Upload the ZIP file containing encrypted Excel and metadata"
+        # Option to manually upload metadata if needed
+        with st.expander("📋 Need to upload metadata separately?"):
+            st.markdown("""
+            If your metadata file has a different name or is in a different location,
+            you can upload it here manually.
+            """)
+            manual_meta = st.file_uploader(
+                "Upload metadata file (optional)",
+                type=['json'],
+                key="manual_meta",
+                help="Only needed if metadata isn't in the same folder"
             )
-            
-            if zip_file:
-                try:
-                    with zipfile.ZipFile(zip_file) as z:
-                        # Extract files
-                        for file_name in z.namelist():
-                            if file_name.endswith('.xlsx'):
-                                encrypted_file = io.BytesIO(z.read(file_name))
-                                encrypted_file.name = file_name
-                            elif file_name.endswith('.json'):
-                                meta_file = io.BytesIO(z.read(file_name))
-                except Exception as e:
-                    st.error(f"Error reading ZIP file: {e}")
-        
-        else:
-            col_a, col_b = st.columns(2)
-            with col_a:
-                encrypted_file = st.file_uploader(
-                    "Encrypted Excel file",
-                    type=['xlsx'],
-                    key="decrypt_excel"
-                )
-            with col_b:
-                meta_file = st.file_uploader(
-                    "Metadata file (JSON)",
-                    type=['json'],
-                    key="decrypt_meta"
-                )
-        
-        # Load metadata if available
-        if meta_file:
-            try:
-                meta_file.seek(0)
-                metadata = json.load(meta_file)
-                st.success("✅ Metadata file loaded successfully")
-                
-                # Display metadata info
-                with st.expander("📋 Metadata Information"):
-                    st.json(metadata)
-                    
-            except Exception as e:
-                st.error(f"Error reading metadata: {e}")
         
         # Password input
         password = st.text_input(
@@ -417,11 +385,32 @@ def run():
                 st.error("Please upload the encrypted Excel file")
             elif not password:
                 st.error("Please enter the password")
-            elif not metadata:
-                st.error("Metadata file is required for decryption")
             else:
                 try:
                     with st.spinner("🔓 Decrypting file..."):
+                        # Try to find metadata
+                        metadata = None
+                        
+                        # First check if user uploaded metadata manually
+                        if manual_meta:
+                            manual_meta.seek(0)
+                            metadata = json.load(manual_meta)
+                            st.info("✅ Using manually uploaded metadata")
+                        
+                        # If no manual metadata, try to find it in the same directory
+                        # Since we're in web app, we can't access file system, so we'll need user to upload it
+                        if not metadata:
+                            st.warning("""
+                            ⚠️ Metadata file not found. 
+                            
+                            To decrypt, you need both:
+                            1. The encrypted Excel file
+                            2. The metadata JSON file (with the salt)
+                            
+                            Please upload the metadata file using the option above.
+                            """)
+                            st.stop()
+                        
                         # Extract metadata
                         iterations = metadata.get('iterations', 300000)
                         columns_to_decrypt = metadata.get('encrypted_columns', [])
@@ -546,10 +535,10 @@ def run():
         # File upload
         uploaded_files = st.file_uploader(
             f"Upload files to {batch_mode.lower()}",
-            type=['xlsx', 'xls'] if "Encrypt" in batch_mode else ['xlsx', 'json', 'zip'],
+            type=['xlsx', 'xls'] if "Encrypt" in batch_mode else ['xlsx'],
             accept_multiple_files=True,
             key="batch_files",
-            help="For decryption, you can upload Excel files and their corresponding metadata files"
+            help="For decryption, upload the encrypted Excel files"
         )
         
         if uploaded_files and len(uploaded_files) > 10:
@@ -576,6 +565,22 @@ def run():
                 value="id,pass,email",
                 key="batch_columns",
                 help="These columns will be encrypted in all files"
+            )
+        
+        # For decryption, ask for metadata folder
+        if "Decrypt" in batch_mode:
+            st.markdown("""
+            **Note for Decryption:**
+            Make sure the metadata JSON files are in the same folder as the Excel files,
+            or upload them separately below.
+            """)
+            
+            metadata_files = st.file_uploader(
+                "Upload metadata files (optional)",
+                type=['json'],
+                accept_multiple_files=True,
+                key="batch_metadata",
+                help="Upload the corresponding metadata JSON files"
             )
         
         # Process button
@@ -660,85 +665,91 @@ def run():
                         progress_bar.progress((i + 1) / total_files)
                     
                 else:
-                    # BATCH DECRYPTION
-                    # Group files by base name
-                    file_groups = {}
-                    for file in uploaded_files:
-                        if file.name.endswith('.xlsx'):
-                            base_name = file.name.replace('encrypted_', '').replace('.xlsx', '')
-                            if base_name not in file_groups:
-                                file_groups[base_name] = {'excel': None, 'meta': None}
-                            file_groups[base_name]['excel'] = file
-                        elif file.name.endswith('.json'):
-                            base_name = file.name.replace('metadata_', '').replace('.json', '')
-                            if base_name not in file_groups:
-                                file_groups[base_name] = {'excel': None, 'meta': None}
-                            file_groups[base_name]['meta'] = file
+                    # BATCH DECRYPTION - SIMPLIFIED
+                    # Match Excel files with metadata by name
+                    metadata_dict = {}
+                    if 'metadata_files' in locals() and metadata_files:
+                        for mf in metadata_files:
+                            base_name = mf.name.replace('metadata_', '').replace('.json', '')
+                            metadata_dict[base_name] = mf
                     
-                    i = 0
-                    for base_name, files in file_groups.items():
-                        if files['excel'] and files['meta']:
-                            i += 1
-                            status_text.text(f"Processing {i}/{len(file_groups)}: {base_name}")
+                    for i, file in enumerate(uploaded_files):
+                        status_text.text(f"Processing {i+1}/{total_files}: {file.name}")
+                        
+                        try:
+                            # Try to find matching metadata
+                            base_name = file.name.replace('encrypted_', '').replace('.xlsx', '')
+                            metadata_file = None
                             
-                            try:
-                                # Load metadata
-                                files['meta'].seek(0)
-                                metadata = json.load(files['meta'])
-                                
-                                # Get salt from metadata
-                                salt_b64 = metadata.get('salt')
-                                if not salt_b64:
-                                    raise Exception("Salt not found in metadata")
-                                
-                                salt = base64_to_salt(salt_b64)
-                                iterations = metadata.get('iterations', 300000)
-                                
-                                # Read Excel
-                                files['excel'].seek(0)
-                                df = pd.read_excel(files['excel'])
-                                
-                                # Generate key
-                                fernet = get_key_from_password(batch_password, salt, iterations)
-                                
-                                # Decrypt
-                                decrypted_data = []
-                                for _, row in df.iterrows():
-                                    decrypted_row = []
-                                    for col in df.columns:
-                                        try:
-                                            if pd.notna(row[col]) and str(row[col]).startswith('gAAAA'):
-                                                decrypted = fernet.decrypt(str(row[col]).encode()).decode()
-                                                decrypted_row.append(decrypted)
-                                            else:
-                                                decrypted_row.append(row[col])
-                                        except:
-                                            decrypted_row.append(row[col])
-                                    decrypted_data.append(decrypted_row)
-                                
-                                decrypted_df = pd.DataFrame(decrypted_data, columns=df.columns)
-                                
-                                # Save to buffer
-                                output = io.BytesIO()
-                                decrypted_df.to_excel(output, index=False)
-                                
+                            # Check in uploaded metadata files
+                            for key, mf in metadata_dict.items():
+                                if key in base_name or base_name in key:
+                                    metadata_file = mf
+                                    break
+                            
+                            if not metadata_file:
                                 results.append({
-                                    'name': f"decrypted_{base_name}.xlsx",
-                                    'data': output.getvalue(),
-                                    'status': 'Success'
-                                })
-                                
-                            except Exception as e:
-                                results.append({
-                                    'name': base_name,
-                                    'status': f'Failed: {str(e)}',
+                                    'name': file.name,
+                                    'status': 'Failed: Metadata file not found',
                                     'error': True
                                 })
+                                continue
                             
-                            # Update progress
-                            progress_bar.progress(i / len(file_groups))
-                    
-                    total_files = len(file_groups)
+                            # Load metadata
+                            metadata_file.seek(0)
+                            metadata = json.load(metadata_file)
+                            
+                            # Get salt from metadata
+                            salt_b64 = metadata.get('salt')
+                            if not salt_b64:
+                                raise Exception("Salt not found in metadata")
+                            
+                            salt = base64_to_salt(salt_b64)
+                            iterations = metadata.get('iterations', 300000)
+                            
+                            # Read Excel
+                            file.seek(0)
+                            df = pd.read_excel(file)
+                            
+                            # Generate key
+                            fernet = get_key_from_password(batch_password, salt, iterations)
+                            
+                            # Decrypt
+                            decrypted_data = []
+                            for _, row in df.iterrows():
+                                decrypted_row = []
+                                for col in df.columns:
+                                    try:
+                                        if pd.notna(row[col]) and str(row[col]).startswith('gAAAA'):
+                                            decrypted = fernet.decrypt(str(row[col]).encode()).decode()
+                                            decrypted_row.append(decrypted)
+                                        else:
+                                            decrypted_row.append(row[col])
+                                    except:
+                                        decrypted_row.append(row[col])
+                                decrypted_data.append(decrypted_row)
+                            
+                            decrypted_df = pd.DataFrame(decrypted_data, columns=df.columns)
+                            
+                            # Save to buffer
+                            output = io.BytesIO()
+                            decrypted_df.to_excel(output, index=False)
+                            
+                            results.append({
+                                'name': f"decrypted_{file.name}",
+                                'data': output.getvalue(),
+                                'status': 'Success'
+                            })
+                            
+                        except Exception as e:
+                            results.append({
+                                'name': file.name,
+                                'status': f'Failed: {str(e)}',
+                                'error': True
+                            })
+                        
+                        # Update progress
+                        progress_bar.progress((i + 1) / total_files)
                 
                 status_text.text("Batch processing complete!")
                 
