@@ -230,6 +230,10 @@ def create_metric_card(title, value, delta=None):
     with col2:
         st.metric(title, value, delta)
 
+
+# After the helper functions, add this:
+# Make add_to_recent available in session state for other modules
+st.session_state.add_to_recent = add_to_recent
 # =============================================================================
 # PAGE ROUTING
 # =============================================================================
