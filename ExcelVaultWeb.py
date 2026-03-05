@@ -3,7 +3,6 @@ import pandas as pd
 import os
 import base64
 import json
-import hashlib
 import secrets
 from datetime import datetime
 from cryptography.hazmat.primitives import hashes
@@ -37,6 +36,22 @@ def run():
             text-align: center;
             margin-bottom: 30px;
         }
+        .success-box {
+            padding: 20px;
+            border-radius: 10px;
+            background-color: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+            margin: 10px 0;
+        }
+        .warning-box {
+            padding: 20px;
+            border-radius: 10px;
+            background-color: #fff3cd;
+            border: 1px solid #ffeeba;
+            color: #856404;
+            margin: 10px 0;
+        }
     </style>
     """, unsafe_allow_html=True)
     
@@ -52,14 +67,24 @@ def run():
         st.session_state.vault_encrypted_data = None
     if 'vault_decrypted_df' not in st.session_state:
         st.session_state.vault_decrypted_df = None
-    if 'vault_salt' not in st.session_state:
-        st.session_state.vault_salt = secrets.token_bytes(16)
     
     # =============================================================================
     # HELPER FUNCTIONS
     # =============================================================================
+    def generate_salt():
+        """Generate a new random salt"""
+        return secrets.token_bytes(16)
+    
+    def salt_to_base64(salt):
+        """Convert salt bytes to base64 string for JSON storage"""
+        return base64.b64encode(salt).decode('utf-8')
+    
+    def base64_to_salt(salt_b64):
+        """Convert base64 string back to salt bytes"""
+        return base64.b64decode(salt_b64)
+    
     def get_key_from_password(password: str, salt: bytes, iterations: int = 300000):
-        """Generate encryption key from password"""
+        """Generate encryption key from password with provided salt"""
         kdf = PBKDF2HMAC(
             algorithm=hashes.SHA256(),
             length=32,
@@ -234,17 +259,22 @@ def run():
                             # Read the file
                             df = pd.read_excel(uploaded_file)
                             
-                            # Generate encryption key
-                            fernet = get_key_from_password(password, st.session_state.vault_salt, iterations)
+                            # Generate a UNIQUE salt for this encryption (critical fix!)
+                            salt = generate_salt()
                             
-                            # Store metadata
+                            # Generate encryption key with the unique salt
+                            fernet = get_key_from_password(password, salt, iterations)
+                            
+                            # Store metadata with salt
                             metadata = {
                                 "encrypted_columns": columns_to_encrypt,
                                 "iterations": iterations,
                                 "timestamp": datetime.now().isoformat(),
                                 "original_file": uploaded_file.name,
                                 "rows": len(df),
-                                "columns": len(df.columns)
+                                "columns": len(df.columns),
+                                "salt": salt_to_base64(salt),  # Save salt in metadata
+                                "version": "2.0"
                             }
                             
                             # Encrypt specified columns
@@ -273,13 +303,16 @@ def run():
                                     zip_file.writestr(f"encrypted_{uploaded_file.name}", excel_buffer.getvalue())
                                     zip_file.writestr(f"metadata_{uploaded_file.name.replace('.xlsx', '.json')}", meta_buffer.getvalue())
                                 
-                                # Success message
-                                st.success(f"""
-                                ✅ Encryption successful!
-                                - Encrypted {encrypted_count} columns
-                                - {len(df)} rows processed
-                                - Using {iterations:,} iterations
-                                """)
+                                # Success message with important note
+                                st.markdown("""
+                                <div class="success-box">
+                                    <strong>✅ Encryption successful!</strong><br>
+                                    - Encrypted {} columns<br>
+                                    - {} rows processed<br>
+                                    - Using {:,} iterations<br><br>
+                                    <strong>⚠️ IMPORTANT:</strong> Keep the metadata file safe! It contains the salt needed for decryption.
+                                </div>
+                                """.format(encrypted_count, len(df), iterations), unsafe_allow_html=True)
                                 
                                 # Download button
                                 st.download_button(
@@ -313,6 +346,7 @@ def run():
         
         encrypted_file = None
         meta_file = None
+        metadata = None
         
         if upload_option == "Upload ZIP package":
             zip_file = st.file_uploader(
@@ -350,6 +384,20 @@ def run():
                     key="decrypt_meta"
                 )
         
+        # Load metadata if available
+        if meta_file:
+            try:
+                meta_file.seek(0)
+                metadata = json.load(meta_file)
+                st.success("✅ Metadata file loaded successfully")
+                
+                # Display metadata info
+                with st.expander("📋 Metadata Information"):
+                    st.json(metadata)
+                    
+            except Exception as e:
+                st.error(f"Error reading metadata: {e}")
+        
         # Password input
         password = st.text_input(
             "Password",
@@ -369,41 +417,52 @@ def run():
                 st.error("Please upload the encrypted Excel file")
             elif not password:
                 st.error("Please enter the password")
+            elif not metadata:
+                st.error("Metadata file is required for decryption")
             else:
                 try:
                     with st.spinner("🔓 Decrypting file..."):
-                        # Try to load metadata
-                        iterations = 300000  # Default
-                        columns_to_decrypt = []
+                        # Extract metadata
+                        iterations = metadata.get('iterations', 300000)
+                        columns_to_decrypt = metadata.get('encrypted_columns', [])
+                        salt_b64 = metadata.get('salt')
                         
-                        if meta_file:
-                            meta_file.seek(0)
-                            metadata = json.load(meta_file)
-                            iterations = metadata.get('iterations', 300000)
-                            columns_to_decrypt = metadata.get('encrypted_columns', [])
+                        if not salt_b64:
+                            st.error("❌ Salt not found in metadata! Cannot decrypt without salt.")
+                            st.info("This file was encrypted with an older version. Please use the desktop version to decrypt it.")
+                            return
+                        
+                        # Convert salt from base64
+                        salt = base64_to_salt(salt_b64)
                         
                         # Read encrypted file
                         encrypted_file.seek(0)
                         df = pd.read_excel(encrypted_file)
                         
-                        # Generate decryption key
-                        fernet = get_key_from_password(password, st.session_state.vault_salt, iterations)
+                        # Generate decryption key with the stored salt
+                        fernet = get_key_from_password(password, salt, iterations)
                         
                         # Decrypt data
                         decrypted_data = []
                         decryption_errors = 0
+                        success_count = 0
                         
                         for idx, row in df.iterrows():
                             decrypted_row = []
                             for col in df.columns:
                                 try:
-                                    if col in columns_to_decrypt and pd.notna(row[col]) and str(row[col]).startswith('gAAAA'):
-                                        decrypted = fernet.decrypt(str(row[col]).encode()).decode()
-                                        decrypted_row.append(decrypted)
+                                    if col in columns_to_decrypt and pd.notna(row[col]) and str(row[col]):
+                                        # Check if it looks like encrypted data (Fernet tokens start with 'gAAAA')
+                                        if str(row[col]).startswith('gAAAA'):
+                                            decrypted = fernet.decrypt(str(row[col]).encode()).decode()
+                                            decrypted_row.append(decrypted)
+                                            success_count += 1
+                                        else:
+                                            decrypted_row.append(row[col])
                                     else:
                                         decrypted_row.append(row[col])
-                                except (InvalidToken, Exception):
-                                    decrypted_row.append("🔒 DECRYPTION FAILED")
+                                except (InvalidToken, Exception) as e:
+                                    decrypted_row.append(f"🔒 DECRYPTION FAILED")
                                     decryption_errors += 1
                             
                             decrypted_data.append(decrypted_row)
@@ -421,7 +480,10 @@ def run():
                         with col2:
                             st.metric("Columns", len(decrypted_df.columns))
                         with col3:
-                            st.metric("Errors", decryption_errors)
+                            st.metric("Decrypted Values", success_count)
+                        
+                        if decryption_errors > 0:
+                            st.warning(f"⚠️ {decryption_errors} values could not be decrypted. Wrong password or corrupted data?")
                         
                         # View options
                         view_option = st.radio(
@@ -470,6 +532,7 @@ def run():
         - Encrypt multiple files with the same password
         - Decrypt multiple encrypted files
         - Process up to 10 files at once
+        - Each file gets its own unique salt for maximum security
         """)
         
         # Batch mode selection
@@ -483,10 +546,10 @@ def run():
         # File upload
         uploaded_files = st.file_uploader(
             f"Upload files to {batch_mode.lower()}",
-            type=['xlsx', 'xls'] if "Encrypt" in batch_mode else ['xlsx'],
+            type=['xlsx', 'xls'] if "Encrypt" in batch_mode else ['xlsx', 'json', 'zip'],
             accept_multiple_files=True,
             key="batch_files",
-            help="You can upload multiple files at once"
+            help="For decryption, you can upload Excel files and their corresponding metadata files"
         )
         
         if uploaded_files and len(uploaded_files) > 10:
@@ -528,16 +591,20 @@ def run():
                 results = []
                 total_files = len(uploaded_files)
                 
-                for i, file in enumerate(uploaded_files):
-                    status_text.text(f"Processing {i+1}/{total_files}: {file.name}")
-                    
-                    try:
-                        if "Encrypt" in batch_mode:
+                if "Encrypt" in batch_mode:
+                    # BATCH ENCRYPTION
+                    for i, file in enumerate(uploaded_files):
+                        status_text.text(f"Processing {i+1}/{total_files}: {file.name}")
+                        
+                        try:
                             # Read Excel
                             df = pd.read_excel(file)
                             
+                            # Generate UNIQUE salt for this file
+                            salt = generate_salt()
+                            
                             # Generate key
-                            fernet = get_key_from_password(batch_password, st.session_state.vault_salt)
+                            fernet = get_key_from_password(batch_password, salt)
                             
                             # Parse columns
                             cols_to_encrypt = [col.strip() for col in columns_batch.split(',')] if columns_batch else []
@@ -552,56 +619,126 @@ def run():
                                     )
                                     encrypted_count += 1
                             
-                            # Save to buffer
-                            output = io.BytesIO()
-                            df.to_excel(output, index=False)
+                            # Create metadata with salt
+                            metadata = {
+                                "encrypted_columns": cols_to_encrypt,
+                                "iterations": 300000,
+                                "timestamp": datetime.now().isoformat(),
+                                "original_file": file.name,
+                                "salt": salt_to_base64(salt),
+                                "version": "2.0"
+                            }
+                            
+                            # Save to buffers
+                            excel_buffer = io.BytesIO()
+                            df.to_excel(excel_buffer, index=False)
+                            
+                            meta_buffer = io.BytesIO()
+                            meta_buffer.write(json.dumps(metadata, indent=2).encode())
+                            
+                            # Create individual ZIP for this file
+                            file_zip = io.BytesIO()
+                            with zipfile.ZipFile(file_zip, 'w') as zip_file:
+                                zip_file.writestr(f"encrypted_{file.name}", excel_buffer.getvalue())
+                                zip_file.writestr(f"metadata_{file.name.replace('.xlsx', '.json')}", meta_buffer.getvalue())
                             
                             results.append({
-                                'name': f"encrypted_{file.name}",
-                                'data': output.getvalue(),
+                                'name': f"encrypted_{file.name.replace('.xlsx', '')}_package.zip",
+                                'data': file_zip.getvalue(),
                                 'status': 'Success',
                                 'encrypted_cols': encrypted_count
                             })
                             
-                        else:  # Decrypt
-                            df = pd.read_excel(file)
-                            fernet = get_key_from_password(batch_password, st.session_state.vault_salt)
-                            
-                            # Try to decrypt all cells that look encrypted
-                            decrypted_data = []
-                            for _, row in df.iterrows():
-                                decrypted_row = []
-                                for col in df.columns:
-                                    try:
-                                        if pd.notna(row[col]) and str(row[col]).startswith('gAAAA'):
-                                            decrypted = fernet.decrypt(str(row[col]).encode()).decode()
-                                            decrypted_row.append(decrypted)
-                                        else:
-                                            decrypted_row.append(row[col])
-                                    except:
-                                        decrypted_row.append(row[col])
-                                decrypted_data.append(decrypted_row)
-                            
-                            decrypted_df = pd.DataFrame(decrypted_data, columns=df.columns)
-                            
-                            output = io.BytesIO()
-                            decrypted_df.to_excel(output, index=False)
-                            
+                        except Exception as e:
                             results.append({
-                                'name': f"decrypted_{file.name}",
-                                'data': output.getvalue(),
-                                'status': 'Success'
+                                'name': file.name,
+                                'status': f'Failed: {str(e)}',
+                                'error': True
                             })
+                        
+                        # Update progress
+                        progress_bar.progress((i + 1) / total_files)
                     
-                    except Exception as e:
-                        results.append({
-                            'name': file.name,
-                            'status': f'Failed: {str(e)}',
-                            'error': True
-                        })
+                else:
+                    # BATCH DECRYPTION
+                    # Group files by base name
+                    file_groups = {}
+                    for file in uploaded_files:
+                        if file.name.endswith('.xlsx'):
+                            base_name = file.name.replace('encrypted_', '').replace('.xlsx', '')
+                            if base_name not in file_groups:
+                                file_groups[base_name] = {'excel': None, 'meta': None}
+                            file_groups[base_name]['excel'] = file
+                        elif file.name.endswith('.json'):
+                            base_name = file.name.replace('metadata_', '').replace('.json', '')
+                            if base_name not in file_groups:
+                                file_groups[base_name] = {'excel': None, 'meta': None}
+                            file_groups[base_name]['meta'] = file
                     
-                    # Update progress
-                    progress_bar.progress((i + 1) / total_files)
+                    i = 0
+                    for base_name, files in file_groups.items():
+                        if files['excel'] and files['meta']:
+                            i += 1
+                            status_text.text(f"Processing {i}/{len(file_groups)}: {base_name}")
+                            
+                            try:
+                                # Load metadata
+                                files['meta'].seek(0)
+                                metadata = json.load(files['meta'])
+                                
+                                # Get salt from metadata
+                                salt_b64 = metadata.get('salt')
+                                if not salt_b64:
+                                    raise Exception("Salt not found in metadata")
+                                
+                                salt = base64_to_salt(salt_b64)
+                                iterations = metadata.get('iterations', 300000)
+                                
+                                # Read Excel
+                                files['excel'].seek(0)
+                                df = pd.read_excel(files['excel'])
+                                
+                                # Generate key
+                                fernet = get_key_from_password(batch_password, salt, iterations)
+                                
+                                # Decrypt
+                                decrypted_data = []
+                                for _, row in df.iterrows():
+                                    decrypted_row = []
+                                    for col in df.columns:
+                                        try:
+                                            if pd.notna(row[col]) and str(row[col]).startswith('gAAAA'):
+                                                decrypted = fernet.decrypt(str(row[col]).encode()).decode()
+                                                decrypted_row.append(decrypted)
+                                            else:
+                                                decrypted_row.append(row[col])
+                                        except:
+                                            decrypted_row.append(row[col])
+                                    decrypted_data.append(decrypted_row)
+                                
+                                decrypted_df = pd.DataFrame(decrypted_data, columns=df.columns)
+                                
+                                # Save to buffer
+                                output = io.BytesIO()
+                                decrypted_df.to_excel(output, index=False)
+                                
+                                results.append({
+                                    'name': f"decrypted_{base_name}.xlsx",
+                                    'data': output.getvalue(),
+                                    'status': 'Success'
+                                })
+                                
+                            except Exception as e:
+                                results.append({
+                                    'name': base_name,
+                                    'status': f'Failed: {str(e)}',
+                                    'error': True
+                                })
+                            
+                            # Update progress
+                            progress_bar.progress(i / len(file_groups))
+                    
+                    total_files = len(file_groups)
                 
                 status_text.text("Batch processing complete!")
                 
